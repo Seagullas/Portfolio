@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+from itertools import product
+
+INPUT_CSV = "NASDAQ_PITON.csv"
+OUTPUT_CSV = "portfolio_values_all_combinations.csv"
+
+
+df = pd.read_csv(INPUT_CSV)
+df["Date"] = pd.to_datetime(df["Date"], format="%m/%d/%Y", errors="coerce")
+df["qqq"] = pd.to_numeric(df["qqq"], errors="coerce")
+df["qqq3"] = pd.to_numeric(df["qqq3"], errors="coerce")
+df = df.dropna(subset=["Date", "qqq", "qqq3"]).sort_values("Date").reset_index(drop=True)
+
+def run_backtest(lower_thr=0.6, upper_thr=0.8, 
+                 target_qqq=0.7, initial_qqq=7000, initial_qqq3=3000):
+
+    qqq_value = float(initial_qqq)
+    qqq3_value = float(initial_qqq3)
+    records = []
+    rebalance_count = 0
+
+    for row in df.itertuples(index=False):
+        date, qqq_ret, qqq3_ret = row.Date, row.qqq, row.qqq3
+
+        qqq_value *= (1 + qqq_ret)
+        qqq3_value *= (1 + qqq3_ret)
+
+        portfolio_value = qqq_value + qqq3_value
+        qqq_ratio = qqq_value / portfolio_value if portfolio_value != 0 else 0.0
+
+        rebalanced = False
+        rebalance_reason = ""
+
+        if qqq_ratio <= lower_thr:
+            qqq_value = portfolio_value * target_qqq
+            qqq3_value = portfolio_value * (1 - target_qqq)
+            qqq_ratio = qqq_value / portfolio_value
+            rebalanced = True
+            rebalance_reason = "low"
+        elif qqq_ratio >= upper_thr:
+            qqq_value = portfolio_value * target_qqq
+            qqq3_value = portfolio_value * (1 - target_qqq)
+            qqq_ratio = qqq_value / portfolio_value
+            rebalanced = True
+            rebalance_reason = "high"
+
+        if rebalanced:
+            rebalance_count += 1
+
+        records.append({
+            "Date": date.date(),
+            "qqq_value": qqq_value,
+            "qqq3_value": qqq3_value,
+            "portfolio_value": portfolio_value,
+            "qqq_ratio": qqq_ratio,
+            "rebalanced": rebalanced,
+            "rebalance_reason": rebalance_reason
+        })
+
+    df_result = pd.DataFrame(records)
+    return df_result, rebalance_count
+
+
+target_qqq = 0.7 
+lower_range = np.arange(0.0, 0.61, 0.01)   
+upper_range = np.arange(0.6, 1.0, 0.01)
+
+summary_records = []
+
+for lower, upper in product(lower_range, upper_range):
+    if lower >= upper:
+        continue
+
+    daily_df, rebalance_count = run_backtest(lower, upper, target_qqq=target_qqq)
+    final_value = daily_df["portfolio_value"].iloc[-1]
+
+    summary_records.append({
+        "lower_thr": lower,
+        "upper_thr": upper,
+        "final_value": final_value,
+        "num_rebalances": rebalance_count
+    })
+
+
+summary_df = pd.DataFrame(summary_records)
+summary_df.to_csv(OUTPUT_CSV, index=False)
+
+print(f"Results for all combinations saved to {OUTPUT_CSV}")
